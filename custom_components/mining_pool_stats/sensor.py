@@ -25,7 +25,7 @@ from .api_braiins import extract_braiins_hashrate_ths
 from .api_powerpool import (
     pp_btc_balance,
     pp_btc_price_usd,
-    pp_sha256_est_revenue_usd,
+    pp_sha256_revenue_24h_usd,
     pp_sha256_hashrate_avg_ths,
     pp_sha256_hashrate_ths,
     pp_sha256_worker_count,
@@ -276,7 +276,7 @@ class PowerPoolRevenueSensor(_PowerPoolSensorBase):
     @property
     def native_value(self) -> float | None:
         if self._pp_data:
-            return pp_sha256_est_revenue_usd(self._pp_data)
+            return pp_sha256_revenue_24h_usd(self._pp_data)
         return None
 
 
@@ -302,7 +302,7 @@ class PowerPoolRevenueBTCSensor(_PowerPoolSensorBase):
     def native_value(self) -> float | None:
         try:
             if self._pp_data and self._btc_price:
-                usd = pp_sha256_est_revenue_usd(self._pp_data)
+                usd = pp_sha256_revenue_24h_usd(self._pp_data)
                 if usd is not None:
                     return round(float(usd) / self._btc_price, 8)
         except Exception:
@@ -442,7 +442,7 @@ class CombinedRevenueUSDSensor(_CombinedSensorBase):
     @property
     def native_value(self) -> float | None:
         try:
-            pp_usd = pp_sha256_est_revenue_usd(self._pp_data) if self._pp_data else None
+            pp_usd = pp_sha256_revenue_24h_usd(self._pp_data) if self._pp_data else None
             btc_price = self._btc_price
 
             braiins_usd = None
@@ -489,7 +489,7 @@ class CombinedRevenueBTCSensor(_CombinedSensorBase):
             pp_btc = None
             btc_price = self._btc_price
             if self._pp_data and btc_price:
-                usd = pp_sha256_est_revenue_usd(self._pp_data)
+                usd = pp_sha256_revenue_24h_usd(self._pp_data)
                 if usd is not None:
                     pp_btc = float(usd) / btc_price
 
@@ -532,7 +532,7 @@ class CombinedRevenueGBPSensor(_CombinedSensorBase):
 
             btc_price = pp_btc_price_usd(self.coordinator.data.get("pp_pool")) if self.coordinator.data else None
 
-            pp_usd = pp_sha256_est_revenue_usd(self._pp_data) if self._pp_data else None
+            pp_usd = pp_sha256_revenue_24h_usd(self._pp_data) if self._pp_data else None
 
             braiins_usd = None
             if self._braiins_profile and btc_price:

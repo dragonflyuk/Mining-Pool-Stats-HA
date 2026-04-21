@@ -18,6 +18,7 @@ User response is keyed by username:
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
@@ -112,6 +113,70 @@ def pp_sha256_est_revenue_usd(user: dict) -> float | None:
     if not key:
         return None
     return hr_dict[key].get("estimated_24h_usd_revenue")
+
+
+def _parse_ts(value) -> datetime | None:
+    """Try to parse a timestamp string or number into an aware datetime."""
+    if value is None:
+        return None
+    # ISO string (with or without trailing Z / offset)
+    try:
+        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts
+    except (ValueError, AttributeError):
+        pass
+    # Unix numeric timestamp
+    try:
+        return datetime.fromtimestamp(float(value), tz=timezone.utc)
+    except (ValueError, TypeError, OSError):
+        pass
+    return None
+
+
+def pp_sha256_actual_revenue_24h_usd(user: dict) -> float | None:
+    """Sum of actual SHA-256 earnings (usd_value) from the last 24 hours.
+
+    Uses the 'earnings' array which reflects real paid/credited amounts —
+    unlike 'estimated_24h_usd_revenue' which drops to zero when hashrate
+    falls.  Returns None if the earnings array is missing or all timestamps
+    are unparseable (caller should fall back to the estimate).
+    """
+    earnings_dict = user.get("earnings", {})
+    key = find_algo_key(earnings_dict, SHA256_ALIASES)
+    if not key:
+        return None
+
+    entries = earnings_dict.get(key)
+    if not isinstance(entries, list) or not entries:
+        return None
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    total = 0.0
+    matched = 0
+
+    for entry in entries:
+        usd = entry.get("usd_value")
+        if usd is None:
+            continue
+        ts = _parse_ts(entry.get("earning_timestamp"))
+        if ts is None:
+            continue          # skip entries we can't date
+        if ts >= cutoff:
+            total += float(usd)
+            matched += 1
+
+    return round(total, 2) if matched > 0 else None
+
+
+def pp_sha256_revenue_24h_usd(user: dict) -> float | None:
+    """Best available 24h USD revenue: actual earnings where possible,
+    estimated (from current hashrate) as a fallback."""
+    actual = pp_sha256_actual_revenue_24h_usd(user)
+    if actual is not None:
+        return actual
+    return pp_sha256_est_revenue_usd(user)
 
 
 def pp_btc_balance(user: dict) -> float | None:
