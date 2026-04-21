@@ -24,6 +24,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api_braiins import extract_braiins_hashrate_ths
 from .api_powerpool import (
     pp_btc_balance,
+    pp_btc_price_usd,
     pp_sha256_est_revenue_usd,
     pp_sha256_hashrate_avg_ths,
     pp_sha256_hashrate_ths,
@@ -51,7 +52,8 @@ async def async_setup_entry(
             BraiinsHashrateSensor(coordinator, config_entry, "hashrate_60m", "Hashrate (60 min)"),
             BraiinsHashrateSensor(coordinator, config_entry, "hashrate_24h", "Hashrate (24 h)"),
             BraiinsBalanceSensor(coordinator, config_entry, "current_balance", "Balance"),
-            BraiinsBalanceSensor(coordinator, config_entry, "today_reward", "Today's Reward"),
+            BraiinsBalanceSensor(coordinator, config_entry, "today_reward", "Today's Reward (BTC)"),
+            BraiinsTodayRewardUSDSensor(coordinator, config_entry),
             BraiinsBalanceSensor(coordinator, config_entry, "estimated_reward", "Estimated Reward"),
             BraiinsWorkerSensor(coordinator, config_entry, "ok_workers", "Workers OK"),
             BraiinsWorkerSensor(coordinator, config_entry, "low_workers", "Workers Low Hashrate"),
@@ -61,12 +63,14 @@ async def async_setup_entry(
             PowerPoolHashrateSensor(coordinator, config_entry, "current", "Hashrate (Current)"),
             PowerPoolHashrateSensor(coordinator, config_entry, "avg", "Hashrate (Average)"),
             PowerPoolRevenueSensor(coordinator, config_entry),
+            PowerPoolRevenueBTCSensor(coordinator, config_entry),
             PowerPoolBTCBalanceSensor(coordinator, config_entry),
             PowerPoolWorkerCountSensor(coordinator, config_entry),
             # --- Combined ---
             CombinedHashrateSensor(coordinator, config_entry),
             CombinedWorkersSensor(coordinator, config_entry),
-            CombinedRevenueSensor(coordinator, config_entry),
+            CombinedRevenueUSDSensor(coordinator, config_entry),
+            CombinedRevenueBTCSensor(coordinator, config_entry),
             CombinedBTCBalanceSensor(coordinator, config_entry),
         ]
     )
@@ -182,6 +186,34 @@ class BraiinsWorkerSensor(_BraiinsSensorBase):
         return None
 
 
+class BraiinsTodayRewardUSDSensor(_BraiinsSensorBase):
+    """Today's reward converted to USD using the BTC spot price from PowerPool."""
+
+    _attr_native_unit_of_measurement = "USD"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_name = "Today's Reward (USD)"
+    _attr_suggested_display_precision = 2
+    _attr_icon = "mdi:cash"
+
+    def __init__(self, coordinator, config_entry) -> None:
+        super().__init__(coordinator, config_entry, "braiins_today_reward_usd")
+
+    @property
+    def _btc_price(self) -> float | None:
+        if self.coordinator.data:
+            return pp_btc_price_usd(self.coordinator.data.get("pp_pool"))
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        if self._profile and self._btc_price:
+            btc = self._profile.get("today_reward")
+            if btc is not None:
+                return round(btc * self._btc_price, 2)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # PowerPool sensors
 # ---------------------------------------------------------------------------
@@ -229,7 +261,7 @@ class PowerPoolRevenueSensor(_PowerPoolSensorBase):
     _attr_native_unit_of_measurement = "USD"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_name = "Estimated Revenue (24 h)"
+    _attr_name = "Estimated Revenue (24 h USD)"
     _attr_suggested_display_precision = 2
 
     def __init__(self, coordinator, config_entry) -> None:
@@ -239,6 +271,33 @@ class PowerPoolRevenueSensor(_PowerPoolSensorBase):
     def native_value(self) -> float | None:
         if self._pp_data:
             return pp_sha256_est_revenue_usd(self._pp_data)
+        return None
+
+
+class PowerPoolRevenueBTCSensor(_PowerPoolSensorBase):
+    """Estimated 24 h revenue converted to BTC using the spot price from /api/pool."""
+
+    _attr_native_unit_of_measurement = BTC
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:bitcoin"
+    _attr_name = "Estimated Revenue (24 h BTC)"
+    _attr_suggested_display_precision = 8
+
+    def __init__(self, coordinator, config_entry) -> None:
+        super().__init__(coordinator, config_entry, "pp_est_revenue_btc")
+
+    @property
+    def _btc_price(self) -> float | None:
+        if self.coordinator.data:
+            return pp_btc_price_usd(self.coordinator.data.get("pp_pool"))
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        if self._pp_data and self._btc_price:
+            usd = pp_sha256_est_revenue_usd(self._pp_data)
+            if usd is not None:
+                return round(usd / self._btc_price, 8)
         return None
 
 
@@ -349,23 +408,82 @@ class CombinedWorkersSensor(_CombinedSensorBase):
         return sum(parts) if parts else None
 
 
-class CombinedRevenueSensor(_CombinedSensorBase):
-    """Combined estimated 24 h revenue in USD (PowerPool figure only — Braiins does not expose USD)."""
+class CombinedRevenueUSDSensor(_CombinedSensorBase):
+    """Total estimated 24 h revenue in USD across both pools.
+
+    PowerPool provides USD directly. Braiins today_reward (BTC) is converted
+    using the BTC spot price from the PowerPool public API.
+    """
 
     _attr_native_unit_of_measurement = "USD"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_name = "Estimated Revenue (24 h)"
+    _attr_name = "Estimated Revenue (24 h USD)"
     _attr_suggested_display_precision = 2
 
     def __init__(self, coordinator, config_entry) -> None:
         super().__init__(coordinator, config_entry, "combined_revenue_usd")
 
     @property
-    def native_value(self) -> float | None:
-        if self._pp_data:
-            return pp_sha256_est_revenue_usd(self._pp_data)
+    def _btc_price(self) -> float | None:
+        if self.coordinator.data:
+            return pp_btc_price_usd(self.coordinator.data.get("pp_pool"))
         return None
+
+    @property
+    def native_value(self) -> float | None:
+        pp_usd = pp_sha256_est_revenue_usd(self._pp_data) if self._pp_data else None
+        btc_price = self._btc_price
+
+        braiins_usd = None
+        if self._braiins_profile and btc_price:
+            btc = self._braiins_profile.get("today_reward")
+            if btc is not None:
+                braiins_usd = btc * btc_price
+
+        parts = [v for v in (pp_usd, braiins_usd) if v is not None]
+        return round(sum(parts), 2) if parts else None
+
+
+class CombinedRevenueBTCSensor(_CombinedSensorBase):
+    """Total estimated 24 h revenue in BTC across both pools.
+
+    Braiins today_reward is already BTC. PowerPool USD figure is converted
+    using the BTC spot price from the PowerPool public API.
+    """
+
+    _attr_native_unit_of_measurement = BTC
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:bitcoin"
+    _attr_name = "Estimated Revenue (24 h BTC)"
+    _attr_suggested_display_precision = 8
+
+    def __init__(self, coordinator, config_entry) -> None:
+        super().__init__(coordinator, config_entry, "combined_revenue_btc")
+
+    @property
+    def _btc_price(self) -> float | None:
+        if self.coordinator.data:
+            return pp_btc_price_usd(self.coordinator.data.get("pp_pool"))
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        braiins_btc = (
+            self._braiins_profile.get("today_reward")
+            if self._braiins_profile
+            else None
+        )
+
+        pp_btc = None
+        btc_price = self._btc_price
+        if self._pp_data and btc_price:
+            usd = pp_sha256_est_revenue_usd(self._pp_data)
+            if usd is not None:
+                pp_btc = usd / btc_price
+
+        parts = [v for v in (braiins_btc, pp_btc) if v is not None]
+        return round(sum(parts), 8) if parts else None
 
 
 class CombinedBTCBalanceSensor(_CombinedSensorBase):

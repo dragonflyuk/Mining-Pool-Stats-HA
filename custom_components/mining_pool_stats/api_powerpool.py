@@ -72,6 +72,10 @@ class PowerPoolAPI:
             return user_data
         return None
 
+    async def get_pool_data(self) -> dict | None:
+        """Return the public pool data (includes prices), or None."""
+        return await self._get("/api/pool")
+
     async def validate(self) -> bool:
         """Return True if the API key is valid."""
         return await self.get_user_data() is not None
@@ -115,6 +119,17 @@ def pp_btc_balance(user: dict) -> float | None:
     for entry in user.get("balances", []):
         if entry.get("coinTicker", "").upper() == "BTC":
             return entry.get("balance")
+    return None
+
+
+def pp_btc_price_usd(pool_data: dict) -> float | None:
+    """Extract the BTC/USD spot price from the public pool response."""
+    if not pool_data:
+        return None
+    prices = pool_data.get("prices", {})
+    for ticker, price in prices.items():
+        if ticker.upper() == "BTC":
+            return float(price)
     return None
 
 

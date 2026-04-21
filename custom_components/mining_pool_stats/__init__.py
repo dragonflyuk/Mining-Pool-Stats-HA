@@ -26,10 +26,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def async_update_data() -> dict:
         """Fetch data from both pools simultaneously."""
-        braiins_profile, braiins_workers, pp_user = await asyncio.gather(
+        braiins_profile, braiins_workers, pp_user, pp_pool = await asyncio.gather(
             braiins.get_user_profile(),
             braiins.get_workers(),
             powerpool.get_user_data(),
+            powerpool.get_pool_data(),
         )
 
         if braiins_profile is None and pp_user is None:
@@ -41,6 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "workers": braiins_workers,    # unwrapped btc dict
             },
             "powerpool": pp_user,              # inner per-user dict
+            "pp_pool": pp_pool,                # public pool data (includes prices)
         }
 
     coordinator = DataUpdateCoordinator(
