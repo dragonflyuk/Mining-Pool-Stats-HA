@@ -382,7 +382,7 @@ class CombinedHashrateSensor(_CombinedSensorBase):
     @property
     def native_value(self) -> float | None:
         braiins_hr = (
-            extract_braiins_hashrate_ths(self._braiins_profile, "hashrate_5m")
+            extract_braiins_hashrate_ths(self._braiins_profile, "hash_rate_5m")
             if self._braiins_profile
             else None
         )
