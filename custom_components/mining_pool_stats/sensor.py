@@ -9,7 +9,6 @@ Three virtual HA devices are created:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -17,7 +16,6 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfCurrency
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -228,7 +226,7 @@ class PowerPoolHashrateSensor(_PowerPoolSensorBase):
 class PowerPoolRevenueSensor(_PowerPoolSensorBase):
     """Estimated 24 h revenue in USD."""
 
-    _attr_native_unit_of_measurement = UnitOfCurrency.DOLLAR
+    _attr_native_unit_of_measurement = "USD"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_name = "Estimated Revenue (24 h)"
@@ -354,7 +352,7 @@ class CombinedWorkersSensor(_CombinedSensorBase):
 class CombinedRevenueSensor(_CombinedSensorBase):
     """Combined estimated 24 h revenue in USD (PowerPool figure only — Braiins does not expose USD)."""
 
-    _attr_native_unit_of_measurement = UnitOfCurrency.DOLLAR
+    _attr_native_unit_of_measurement = "USD"
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_name = "Estimated Revenue (24 h)"
