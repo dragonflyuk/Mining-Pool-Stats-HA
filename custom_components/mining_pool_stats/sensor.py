@@ -25,7 +25,7 @@ from .api_braiins import extract_braiins_hashrate_ths
 from .api_powerpool import (
     pp_btc_balance,
     pp_btc_price_usd,
-    pp_sha256_revenue_24h_usd,
+    pp_sha256_estimated_24h_btc,
     pp_sha256_hashrate_avg_ths,
     pp_sha256_hashrate_ths,
     pp_sha256_worker_count,
@@ -261,27 +261,8 @@ class PowerPoolHashrateSensor(_PowerPoolSensorBase):
         return None
 
 
-class PowerPoolRevenueSensor(_PowerPoolSensorBase):
-    """Estimated 24 h revenue in USD."""
-
-    _attr_native_unit_of_measurement = "USD"
-    _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.TOTAL
-    _attr_name = "Estimated Revenue (24 h USD)"
-    _attr_suggested_display_precision = 2
-
-    def __init__(self, coordinator, config_entry) -> None:
-        super().__init__(coordinator, config_entry, "pp_est_revenue_usd")
-
-    @property
-    def native_value(self) -> float | None:
-        if self._pp_data:
-            return pp_sha256_revenue_24h_usd(self._pp_data)
-        return None
-
-
 class PowerPoolRevenueBTCSensor(_PowerPoolSensorBase):
-    """Estimated 24 h revenue converted to BTC using the spot price from /api/pool."""
+    """Estimated 24 h revenue in BTC, derived from the historical earnings rate."""
 
     _attr_native_unit_of_measurement = BTC
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -293,6 +274,25 @@ class PowerPoolRevenueBTCSensor(_PowerPoolSensorBase):
         super().__init__(coordinator, config_entry, "pp_est_revenue_btc")
 
     @property
+    def native_value(self) -> float | None:
+        if self._pp_data:
+            return pp_sha256_estimated_24h_btc(self._pp_data)
+        return None
+
+
+class PowerPoolRevenueSensor(_PowerPoolSensorBase):
+    """Estimated 24 h revenue in USD (BTC estimate × spot price)."""
+
+    _attr_native_unit_of_measurement = "USD"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_name = "Estimated Revenue (24 h USD)"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator, config_entry) -> None:
+        super().__init__(coordinator, config_entry, "pp_est_revenue_usd")
+
+    @property
     def _btc_price(self) -> float | None:
         if self.coordinator.data:
             return pp_btc_price_usd(self.coordinator.data.get("pp_pool"))
@@ -302,11 +302,11 @@ class PowerPoolRevenueBTCSensor(_PowerPoolSensorBase):
     def native_value(self) -> float | None:
         try:
             if self._pp_data and self._btc_price:
-                usd = pp_sha256_revenue_24h_usd(self._pp_data)
-                if usd is not None:
-                    return round(float(usd) / self._btc_price, 8)
+                btc = pp_sha256_estimated_24h_btc(self._pp_data)
+                if btc is not None:
+                    return round(btc * self._btc_price, 2)
         except Exception:
-            _LOGGER.exception("Error calculating PowerPool revenue BTC")
+            _LOGGER.exception("Error calculating PowerPool revenue USD")
         return None
 
 
@@ -442,14 +442,19 @@ class CombinedRevenueUSDSensor(_CombinedSensorBase):
     @property
     def native_value(self) -> float | None:
         try:
-            pp_usd = pp_sha256_revenue_24h_usd(self._pp_data) if self._pp_data else None
             btc_price = self._btc_price
+
+            pp_usd = None
+            if self._pp_data and btc_price:
+                pp_btc = pp_sha256_estimated_24h_btc(self._pp_data)
+                if pp_btc is not None:
+                    pp_usd = pp_btc * btc_price
 
             braiins_usd = None
             if self._braiins_profile and btc_price:
-                btc = self._braiins_profile.get("today_reward")
-                if btc is not None:
-                    braiins_usd = float(btc) * btc_price
+                raw = self._braiins_profile.get("today_reward")
+                if raw is not None:
+                    braiins_usd = float(raw) * btc_price
 
             parts = [v for v in (pp_usd, braiins_usd) if v is not None]
             return round(sum(parts), 2) if parts else None
@@ -486,12 +491,7 @@ class CombinedRevenueBTCSensor(_CombinedSensorBase):
             raw = self._braiins_profile.get("today_reward") if self._braiins_profile else None
             braiins_btc = float(raw) if raw is not None else None
 
-            pp_btc = None
-            btc_price = self._btc_price
-            if self._pp_data and btc_price:
-                usd = pp_sha256_revenue_24h_usd(self._pp_data)
-                if usd is not None:
-                    pp_btc = float(usd) / btc_price
+            pp_btc = pp_sha256_estimated_24h_btc(self._pp_data) if self._pp_data else None
 
             parts = [v for v in (braiins_btc, pp_btc) if v is not None]
             return round(sum(parts), 8) if parts else None
@@ -532,7 +532,11 @@ class CombinedRevenueGBPSensor(_CombinedSensorBase):
 
             btc_price = pp_btc_price_usd(self.coordinator.data.get("pp_pool")) if self.coordinator.data else None
 
-            pp_usd = pp_sha256_revenue_24h_usd(self._pp_data) if self._pp_data else None
+            pp_usd = None
+            if self._pp_data and btc_price:
+                pp_btc = pp_sha256_estimated_24h_btc(self._pp_data)
+                if pp_btc is not None:
+                    pp_usd = pp_btc * btc_price
 
             braiins_usd = None
             if self._braiins_profile and btc_price:
