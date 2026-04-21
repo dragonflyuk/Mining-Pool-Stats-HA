@@ -138,23 +138,36 @@ def _parse_ts(value) -> datetime | None:
 def pp_sha256_actual_revenue_24h_usd(user: dict) -> float | None:
     """Sum of actual SHA-256 earnings (usd_value) from the last 24 hours.
 
-    Uses the 'earnings' array which reflects real paid/credited amounts —
-    unlike 'estimated_24h_usd_revenue' which drops to zero when hashrate
-    falls.  Returns None if the earnings array is missing or all timestamps
-    are unparseable (caller should fall back to the estimate).
+    Uses the 'earnings' array which reflects real paid/credited amounts.
+    Logs the raw entries on first call so the timestamp format can be verified.
+    Returns None only if the earnings array is missing entirely.
+    Returns 0.0 if the array exists but nothing falls in the 24-hour window
+    (caller must NOT fall back to the estimated figure in that case).
     """
     earnings_dict = user.get("earnings", {})
     key = find_algo_key(earnings_dict, SHA256_ALIASES)
     if not key:
+        _LOGGER.debug("mining_pool_stats: no SHA-256 key found in earnings dict keys=%s", list(earnings_dict.keys()))
         return None
 
     entries = earnings_dict.get(key)
-    if not isinstance(entries, list) or not entries:
+    if not isinstance(entries, list):
         return None
+
+    # Debug log — shows timestamp format and usd_value shape (first 3 entries)
+    _LOGGER.warning(
+        "mining_pool_stats DEBUG earnings — key=%s first_3=%s",
+        key,
+        entries[:3],
+    )
+
+    if not entries:
+        return 0.0  # array exists, just empty → genuinely $0 (don't use estimate)
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     total = 0.0
     matched = 0
+    unparseable = 0
 
     for entry in entries:
         usd = entry.get("usd_value")
@@ -162,21 +175,33 @@ def pp_sha256_actual_revenue_24h_usd(user: dict) -> float | None:
             continue
         ts = _parse_ts(entry.get("earning_timestamp"))
         if ts is None:
-            continue          # skip entries we can't date
+            unparseable += 1
+            # Include this entry anyway — we can't exclude what we can't date
+            total += float(usd)
+            matched += 1
+            continue
         if ts >= cutoff:
             total += float(usd)
             matched += 1
 
-    return round(total, 2) if matched > 0 else None
+    if unparseable:
+        _LOGGER.warning(
+            "mining_pool_stats: %d earnings entries had unparseable timestamps; "
+            "included them all — check debug log above to confirm format",
+            unparseable,
+        )
+
+    return round(total, 2)
 
 
 def pp_sha256_revenue_24h_usd(user: dict) -> float | None:
-    """Best available 24h USD revenue: actual earnings where possible,
-    estimated (from current hashrate) as a fallback."""
-    actual = pp_sha256_actual_revenue_24h_usd(user)
-    if actual is not None:
-        return actual
-    return pp_sha256_est_revenue_usd(user)
+    """Actual SHA-256 earnings for the last 24 h.
+
+    Never falls back to the estimated figure — that figure drops to zero
+    when hashrate falls, which corrupts downstream calculations like
+    revenue-per-kWh.  Returns None only when the earnings key is absent.
+    """
+    return pp_sha256_actual_revenue_24h_usd(user)
 
 
 def pp_btc_balance(user: dict) -> float | None:
