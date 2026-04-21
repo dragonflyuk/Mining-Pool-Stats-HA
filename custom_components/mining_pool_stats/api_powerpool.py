@@ -20,8 +20,6 @@ User response is keyed by username:
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-
 import aiohttp
 
 from .const import HASHRATE_TO_TH, POWERPOOL_BASE_URL, SHA256_ALIASES
@@ -47,23 +45,6 @@ def find_algo_key(data: dict, aliases: frozenset) -> str | None:
             return key
     return next(iter(data), None)  # fallback: first key
 
-
-def _parse_ts(value) -> datetime | None:
-    """Try to parse a timestamp string or number into an aware datetime."""
-    if value is None:
-        return None
-    try:
-        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        return ts
-    except (ValueError, AttributeError):
-        pass
-    try:
-        return datetime.fromtimestamp(float(value), tz=timezone.utc)
-    except (ValueError, TypeError, OSError):
-        pass
-    return None
 
 
 class PowerPoolAPI:
@@ -129,17 +110,13 @@ def pp_sha256_hashrate_avg_ths(user: dict) -> float | None:
 
 
 def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
-    """Estimate 24 h BTC earnings from historical payment rate × average hashrate.
+    """Estimate 24 h BTC earnings: mean(coin_balance / speed) × hashrate_avg.
 
-    Algorithm:
-      For each earnings entry the pool records the BTC paid (coin_balance) and
-      the contributing hashrate (speed).  Dividing gives the rate in BTC per
-      TH/s per earnings period.  The median gap between consecutive entry
-      timestamps tells us the period length, from which we compute how many
-      periods fit in 24 h.  Multiplying rate × periods_per_day × hashrate_avg
-      gives the estimated daily BTC at the current average hashrate.
+    Each earnings entry records the BTC paid (coin_balance) and the hashrate
+    that produced it (speed).  Their ratio is the BTC earned per TH/s for that
+    payment.  Averaging across entries gives a stable rate; multiplying by the
+    24 h average hashrate scales it to our rig's contribution.
     """
-    # Average hashrate used for the final scaling step
     hr_dict = user.get("hashrate", {})
     key = find_algo_key(hr_dict, SHA256_ALIASES)
     if not key:
@@ -149,7 +126,6 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
     if not hashrate_avg_ths or hashrate_avg_ths <= 0:
         return None
 
-    # Earnings entries
     earnings_dict = user.get("earnings", {})
     ekey = find_algo_key(earnings_dict, SHA256_ALIASES)
     if not ekey:
@@ -165,8 +141,7 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
             entries[:3],
         )
 
-    # Parse each entry: (timestamp | None, btc_earned, speed_ths)
-    parsed: list[tuple[datetime | None, float, float]] = []
+    rates: list[float] = []
     for entry in entries:
         coin_balance = entry.get("coin_balance")
         speed = entry.get("speed")
@@ -179,45 +154,17 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
             continue
         if spd <= 0 or btc < 0:
             continue
-        # Speed unit — try several field names, default to TH
-        speed_unit = (
-            entry.get("speed_unit")
-            or entry.get("hashrate_units")
-            or "TH"
-        )
+        speed_unit = entry.get("speed_unit") or entry.get("hashrate_units") or "TH"
         spd_ths = _to_ths(spd, speed_unit)
         if spd_ths is None or spd_ths <= 0:
             spd_ths = spd  # assume already TH/s
-        ts = _parse_ts(entry.get("earning_timestamp"))
-        parsed.append((ts, btc, spd_ths))
+        rates.append(btc / spd_ths)
 
-    if not parsed:
+    if not rates:
         return None
 
-    # --- Path A: use timestamps to determine period length ---
-    dated = [(ts, btc, spd) for ts, btc, spd in parsed if ts is not None]
-
-    if len(dated) >= 2:
-        dated.sort(key=lambda x: x[0])
-        gaps_h = [
-            (dated[i + 1][0] - dated[i][0]).total_seconds() / 3600
-            for i in range(len(dated) - 1)
-        ]
-        # Median gap is the typical period length
-        median_gap_h = sorted(gaps_h)[len(gaps_h) // 2]
-        if median_gap_h >= (1 / 60):  # at least 1 minute — filter out duplicates
-            avg_rate = sum(btc / spd for _, btc, spd in dated) / len(dated)
-            periods_per_day = 24.0 / median_gap_h
-            return round(avg_rate * periods_per_day * hashrate_avg_ths, 8)
-
-    # --- Path B: no usable timestamps — assume entries span exactly 24 h ---
-    # This is a rough fallback; accuracy depends on what window the API returns.
-    total_btc = sum(btc for _, btc, spd in parsed)
-    avg_spd = sum(spd for _, btc, spd in parsed) / len(parsed)
-    if avg_spd <= 0:
-        return None
-    rate_per_ths = total_btc / avg_spd
-    return round(rate_per_ths * hashrate_avg_ths, 8)
+    avg_rate = sum(rates) / len(rates)
+    return round(avg_rate * hashrate_avg_ths, 8)
 
 
 def pp_btc_balance(user: dict) -> float | None:
