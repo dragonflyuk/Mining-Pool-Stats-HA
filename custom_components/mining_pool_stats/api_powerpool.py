@@ -138,29 +138,39 @@ def _parse_ts(value) -> datetime | None:
 def pp_sha256_revenue_24h_usd(user: dict) -> float | None:
     """Best available SHA-256 daily revenue in USD.
 
-    Priority order — never falls back to the estimated figure (that
-    collapses to zero whenever hashrate drops, corrupting kWh calculations):
-
-    1. Sum of earnings entries whose timestamps fall within the last 24 h.
-    2. If nothing is in the 24 h window (e.g. earnings are daily summaries
-       that only populate at end of day), use the most recent entry as a
-       stable reference so the value doesn't plummet when mining stops.
-    3. If timestamps can't be parsed at all, sum all available entries.
-    4. Return None only when the earnings array is absent entirely.
+    Priority order:
+    1. estimated_24h_usd_revenue from the hashrate dict — this is what the
+       PowerPool dashboard displays and is the most accurate live figure.
+    2. If that is zero or missing (miner offline / hashrate dropped to zero),
+       fall back to the most recent earnings entry so the value stays stable
+       rather than collapsing to zero and corrupting kWh calculations.
+    3. Return None only when both sources are entirely absent.
     """
+    # --- 1. Server-side estimate (matches the website) ---
+    hr_dict = user.get("hashrate", {})
+    key = find_algo_key(hr_dict, SHA256_ALIASES)
+    if key:
+        estimated = hr_dict[key].get("estimated_24h_usd_revenue")
+        if estimated is not None:
+            try:
+                val = float(estimated)
+                if val > 0:
+                    return round(val, 2)
+            except (TypeError, ValueError):
+                pass
+
+    # --- 2. Fallback: most recent earnings entry (keeps value stable offline) ---
     earnings_dict = user.get("earnings", {})
-    key = find_algo_key(earnings_dict, SHA256_ALIASES)
-    if not key:
+    ekey = find_algo_key(earnings_dict, SHA256_ALIASES)
+    if not ekey:
         return None
 
-    entries = earnings_dict.get(key)
+    entries = earnings_dict.get(ekey)
     if not isinstance(entries, list) or not entries:
         return None
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-
     dated: list[tuple[datetime, float]] = []
-    undated_total = 0.0
+    undated: list[float] = []
 
     for entry in entries:
         usd = entry.get("usd_value")
@@ -170,24 +180,14 @@ def pp_sha256_revenue_24h_usd(user: dict) -> float | None:
         if ts is not None:
             dated.append((ts, float(usd)))
         else:
-            undated_total += float(usd)
+            undated.append(float(usd))
 
     if dated:
-        # Sort newest → oldest so dated[0] is always the most recent entry
         dated.sort(key=lambda x: x[0], reverse=True)
-
-        # 1. Prefer the sum of entries within the rolling 24 h window
-        recent_total = sum(usd for ts, usd in dated if ts >= cutoff)
-        if recent_total > 0:
-            return round(recent_total, 2)
-
-        # 2. Nothing in the last 24 h (gap between periods / miner just stopped):
-        #    return the most recent completed entry so the value stays stable
         return round(dated[0][1], 2)
 
-    # 3. No parseable timestamps — sum everything returned by the API
-    if undated_total > 0:
-        return round(undated_total, 2)
+    if undated:
+        return round(undated[-1], 2)  # last entry in list
 
     return None
 
