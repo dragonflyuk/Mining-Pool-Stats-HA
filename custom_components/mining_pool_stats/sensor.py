@@ -207,10 +207,13 @@ class BraiinsTodayRewardUSDSensor(_BraiinsSensorBase):
 
     @property
     def native_value(self) -> float | None:
-        if self._profile and self._btc_price:
-            btc = self._profile.get("today_reward")
-            if btc is not None:
-                return round(btc * self._btc_price, 2)
+        try:
+            if self._profile and self._btc_price:
+                btc = self._profile.get("today_reward")
+                if btc is not None:
+                    return round(float(btc) * self._btc_price, 2)
+        except Exception:
+            _LOGGER.exception("Error calculating Braiins today_reward USD")
         return None
 
 
@@ -294,10 +297,13 @@ class PowerPoolRevenueBTCSensor(_PowerPoolSensorBase):
 
     @property
     def native_value(self) -> float | None:
-        if self._pp_data and self._btc_price:
-            usd = pp_sha256_est_revenue_usd(self._pp_data)
-            if usd is not None:
-                return round(usd / self._btc_price, 8)
+        try:
+            if self._pp_data and self._btc_price:
+                usd = pp_sha256_est_revenue_usd(self._pp_data)
+                if usd is not None:
+                    return round(float(usd) / self._btc_price, 8)
+        except Exception:
+            _LOGGER.exception("Error calculating PowerPool revenue BTC")
         return None
 
 
@@ -432,17 +438,21 @@ class CombinedRevenueUSDSensor(_CombinedSensorBase):
 
     @property
     def native_value(self) -> float | None:
-        pp_usd = pp_sha256_est_revenue_usd(self._pp_data) if self._pp_data else None
-        btc_price = self._btc_price
+        try:
+            pp_usd = pp_sha256_est_revenue_usd(self._pp_data) if self._pp_data else None
+            btc_price = self._btc_price
 
-        braiins_usd = None
-        if self._braiins_profile and btc_price:
-            btc = self._braiins_profile.get("today_reward")
-            if btc is not None:
-                braiins_usd = btc * btc_price
+            braiins_usd = None
+            if self._braiins_profile and btc_price:
+                btc = self._braiins_profile.get("today_reward")
+                if btc is not None:
+                    braiins_usd = float(btc) * btc_price
 
-        parts = [v for v in (pp_usd, braiins_usd) if v is not None]
-        return round(sum(parts), 2) if parts else None
+            parts = [v for v in (pp_usd, braiins_usd) if v is not None]
+            return round(sum(parts), 2) if parts else None
+        except Exception:
+            _LOGGER.exception("Error calculating combined revenue USD")
+            return None
 
 
 class CombinedRevenueBTCSensor(_CombinedSensorBase):
@@ -469,21 +479,25 @@ class CombinedRevenueBTCSensor(_CombinedSensorBase):
 
     @property
     def native_value(self) -> float | None:
-        braiins_btc = (
-            self._braiins_profile.get("today_reward")
-            if self._braiins_profile
-            else None
-        )
+        try:
+            braiins_btc = (
+                self._braiins_profile.get("today_reward")
+                if self._braiins_profile
+                else None
+            )
 
-        pp_btc = None
-        btc_price = self._btc_price
-        if self._pp_data and btc_price:
-            usd = pp_sha256_est_revenue_usd(self._pp_data)
-            if usd is not None:
-                pp_btc = usd / btc_price
+            pp_btc = None
+            btc_price = self._btc_price
+            if self._pp_data and btc_price:
+                usd = pp_sha256_est_revenue_usd(self._pp_data)
+                if usd is not None:
+                    pp_btc = float(usd) / btc_price
 
-        parts = [v for v in (braiins_btc, pp_btc) if v is not None]
-        return round(sum(parts), 8) if parts else None
+            parts = [v for v in (braiins_btc, pp_btc) if v is not None]
+            return round(sum(parts), 8) if parts else None
+        except Exception:
+            _LOGGER.exception("Error calculating combined revenue BTC")
+            return None
 
 
 class CombinedBTCBalanceSensor(_CombinedSensorBase):
@@ -500,12 +514,16 @@ class CombinedBTCBalanceSensor(_CombinedSensorBase):
 
     @property
     def native_value(self) -> float | None:
-        braiins_bal = (
-            self._braiins_profile.get("current_balance")
-            if self._braiins_profile
-            else None
-        )
-        pp_bal = pp_btc_balance(self._pp_data) if self._pp_data else None
+        try:
+            braiins_bal = (
+                self._braiins_profile.get("current_balance")
+                if self._braiins_profile
+                else None
+            )
+            pp_bal = pp_btc_balance(self._pp_data) if self._pp_data else None
 
-        parts = [v for v in (braiins_bal, pp_bal) if v is not None]
-        return round(sum(parts), 8) if parts else None
+            parts = [v for v in (braiins_bal, pp_bal) if v is not None]
+            return round(sum(parts), 8) if parts else None
+        except Exception:
+            _LOGGER.exception("Error calculating combined BTC balance")
+            return None

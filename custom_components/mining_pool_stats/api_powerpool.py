@@ -116,20 +116,35 @@ def pp_sha256_est_revenue_usd(user: dict) -> float | None:
 
 def pp_btc_balance(user: dict) -> float | None:
     """BTC balance from the balances list, or None."""
-    for entry in user.get("balances", []):
-        if entry.get("coinTicker", "").upper() == "BTC":
-            return entry.get("balance")
+    try:
+        balances = user.get("balances", [])
+        # Gracefully handle both list and dict formats
+        if isinstance(balances, dict):
+            balances = balances.values()
+        for entry in balances:
+            if isinstance(entry, dict) and entry.get("coinTicker", "").upper() == "BTC":
+                return entry.get("balance")
+    except Exception:
+        _LOGGER.exception("Error reading PowerPool BTC balance")
     return None
 
 
 def pp_btc_price_usd(pool_data: dict) -> float | None:
     """Extract the BTC/USD spot price from the public pool response."""
-    if not pool_data:
-        return None
-    prices = pool_data.get("prices", {})
-    for ticker, price in prices.items():
-        if ticker.upper() == "BTC":
-            return float(price)
+    try:
+        if not pool_data:
+            return None
+        prices = pool_data.get("prices", {})
+        if not isinstance(prices, dict):
+            return None
+        for ticker, price in prices.items():
+            if str(ticker).upper() == "BTC":
+                return float(price)
+        _LOGGER.debug(
+            "mining_pool_stats DEBUG — pp_pool prices keys: %s", list(prices.keys())
+        )
+    except Exception:
+        _LOGGER.exception("Error reading PowerPool BTC price")
     return None
 
 
