@@ -143,21 +143,25 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
 
     rates: list[float] = []
     for entry in entries:
-        coin_balance = entry.get("coin_balance")
+        # coin_balance is inside entry["coins"] — find the BTC entry
+        btc_raw = None
+        for coin in entry.get("coins", []):
+            if coin.get("coin_ticker", "").upper() == "BTC":
+                btc_raw = coin.get("coin_balance")
+                break
         speed = entry.get("speed")
-        if coin_balance is None or speed is None:
+        if btc_raw is None or speed is None:
             continue
         try:
-            btc = float(coin_balance)
+            btc = float(btc_raw)
             spd = float(speed)
         except (TypeError, ValueError):
             continue
         if spd <= 0 or btc < 0:
             continue
-        speed_unit = entry.get("speed_unit") or entry.get("hashrate_units") or "TH"
-        spd_ths = _to_ths(spd, speed_unit)
-        if spd_ths is None or spd_ths <= 0:
-            spd_ths = spd  # assume already TH/s
+        spd_ths = _to_ths(spd, entry.get("speed_units") or "TH/s")
+        if not spd_ths or spd_ths <= 0:
+            continue
         rates.append(btc / spd_ths)
 
     if not rates:
