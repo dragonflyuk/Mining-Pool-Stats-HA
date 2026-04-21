@@ -18,7 +18,6 @@ User response is keyed by username:
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
@@ -115,81 +114,25 @@ def pp_sha256_est_revenue_usd(user: dict) -> float | None:
     return hr_dict[key].get("estimated_24h_usd_revenue")
 
 
-def _parse_ts(value) -> datetime | None:
-    """Try to parse a timestamp string or number into an aware datetime."""
-    if value is None:
-        return None
-    # ISO string (with or without trailing Z / offset)
-    try:
-        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        return ts
-    except (ValueError, AttributeError):
-        pass
-    # Unix numeric timestamp
-    try:
-        return datetime.fromtimestamp(float(value), tz=timezone.utc)
-    except (ValueError, TypeError, OSError):
-        pass
-    return None
-
 
 def pp_sha256_revenue_24h_usd(user: dict) -> float | None:
-    """Best available SHA-256 daily revenue in USD.
+    """SHA-256 estimated 24 h revenue in USD from the PowerPool server.
 
-    Priority order:
-    1. estimated_24h_usd_revenue from the hashrate dict — this is what the
-       PowerPool dashboard displays and is the most accurate live figure.
-    2. If that is zero or missing (miner offline / hashrate dropped to zero),
-       fall back to the most recent earnings entry so the value stays stable
-       rather than collapsing to zero and corrupting kWh calculations.
-    3. Return None only when both sources are entirely absent.
+    Uses estimated_24h_usd_revenue directly — this matches the value shown
+    on the PowerPool dashboard and decays gradually as the rolling average
+    hashrate drops when a miner goes offline.
     """
-    # --- 1. Server-side estimate (matches the website) ---
     hr_dict = user.get("hashrate", {})
     key = find_algo_key(hr_dict, SHA256_ALIASES)
-    if key:
-        estimated = hr_dict[key].get("estimated_24h_usd_revenue")
-        if estimated is not None:
-            try:
-                val = float(estimated)
-                if val > 0:
-                    return round(val, 2)
-            except (TypeError, ValueError):
-                pass
-
-    # --- 2. Fallback: most recent earnings entry (keeps value stable offline) ---
-    earnings_dict = user.get("earnings", {})
-    ekey = find_algo_key(earnings_dict, SHA256_ALIASES)
-    if not ekey:
+    if not key:
         return None
-
-    entries = earnings_dict.get(ekey)
-    if not isinstance(entries, list) or not entries:
+    estimated = hr_dict[key].get("estimated_24h_usd_revenue")
+    if estimated is None:
         return None
-
-    dated: list[tuple[datetime, float]] = []
-    undated: list[float] = []
-
-    for entry in entries:
-        usd = entry.get("usd_value")
-        if usd is None:
-            continue
-        ts = _parse_ts(entry.get("earning_timestamp"))
-        if ts is not None:
-            dated.append((ts, float(usd)))
-        else:
-            undated.append(float(usd))
-
-    if dated:
-        dated.sort(key=lambda x: x[0], reverse=True)
-        return round(dated[0][1], 2)
-
-    if undated:
-        return round(undated[-1], 2)  # last entry in list
-
-    return None
+    try:
+        return round(float(estimated), 2)
+    except (TypeError, ValueError):
+        return None
 
 
 def pp_btc_balance(user: dict) -> float | None:
