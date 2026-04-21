@@ -1,0 +1,12 @@
+{
+  "domain": "mining_pool_stats",
+  "name": "Mining Pool Stats",
+  "version": "1.0.0",
+  "config_flow": true,
+  "documentation": "https://github.com/dragonflyuk/Mining-Pool-Stats-HA",
+  "issue_tracker": "https://github.com/dragonflyuk/Mining-Pool-Stats-HA/issues",
+  "requirements": [],
+  "codeowners": ["@dragonflyuk"],
+  "iot_class": "cloud_polling",
+  "homeassistant": "2023.11.0"
+}

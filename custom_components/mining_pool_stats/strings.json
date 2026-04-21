@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mining Pool Stats Setup",
+        "description": "Enter your API keys for both pools. Your Braiins Pool key is at pool.braiins.com/settings/api. Your PowerPool key is in your PowerPool dashboard.",
+        "data": {
+          "braiins_api_key": "Braiins Pool API Key",
+          "powerpool_api_key": "PowerPool API Key"
+        }
+      }
+    },
+    "error": {
+      "both_invalid": "Could not authenticate with either pool. Please check both API keys.",
+      "invalid_auth": "Invalid API key — authentication failed."
+    },
+    "abort": {
+      "already_configured": "This combination of API keys is already configured."
+    }
+  }
+}
