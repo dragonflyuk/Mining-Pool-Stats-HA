@@ -10,6 +10,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api_braiins import BraiinsPoolAPI
+from .api_fx import get_usd_to_gbp
 from .api_powerpool import PowerPoolAPI
 from .const import DOMAIN, PLATFORMS, UPDATE_INTERVAL
 
@@ -26,11 +27,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def async_update_data() -> dict:
         """Fetch data from both pools simultaneously."""
-        braiins_profile, braiins_workers, pp_user, pp_pool = await asyncio.gather(
-            braiins.get_user_profile(),
-            braiins.get_workers(),
-            powerpool.get_user_data(),
-            powerpool.get_pool_data(),
+        braiins_profile, braiins_workers, pp_user, pp_pool, usd_to_gbp = (
+            await asyncio.gather(
+                braiins.get_user_profile(),
+                braiins.get_workers(),
+                powerpool.get_user_data(),
+                powerpool.get_pool_data(),
+                get_usd_to_gbp(session),
+            )
         )
 
         if braiins_profile is None and pp_user is None:
@@ -43,6 +47,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             },
             "powerpool": pp_user,              # inner per-user dict
             "pp_pool": pp_pool,                # public pool data (includes prices)
+            "usd_to_gbp": usd_to_gbp,         # float or None
         }
 
     coordinator = DataUpdateCoordinator(

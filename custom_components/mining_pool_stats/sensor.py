@@ -71,6 +71,7 @@ async def async_setup_entry(
             CombinedWorkersSensor(coordinator, config_entry),
             CombinedRevenueUSDSensor(coordinator, config_entry),
             CombinedRevenueBTCSensor(coordinator, config_entry),
+            CombinedRevenueGBPSensor(coordinator, config_entry),
             CombinedBTCBalanceSensor(coordinator, config_entry),
         ]
     )
@@ -496,6 +497,55 @@ class CombinedRevenueBTCSensor(_CombinedSensorBase):
             return round(sum(parts), 8) if parts else None
         except Exception:
             _LOGGER.exception("Error calculating combined revenue BTC")
+            return None
+
+
+class CombinedRevenueGBPSensor(_CombinedSensorBase):
+    """Total estimated 24 h revenue in GBP.
+
+    Converts the combined USD revenue using the live USD→GBP rate
+    from the Frankfurter API (fetched each coordinator update cycle).
+    """
+
+    _attr_native_unit_of_measurement = "GBP"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_name = "Estimated Revenue (24 h GBP)"
+    _attr_suggested_display_precision = 2
+    _attr_icon = "mdi:currency-gbp"
+
+    def __init__(self, coordinator, config_entry) -> None:
+        super().__init__(coordinator, config_entry, "combined_revenue_gbp")
+
+    @property
+    def _usd_to_gbp(self) -> float | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("usd_to_gbp")
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        try:
+            usd_to_gbp = self._usd_to_gbp
+            if not usd_to_gbp:
+                return None
+
+            btc_price = pp_btc_price_usd(self.coordinator.data.get("pp_pool")) if self.coordinator.data else None
+
+            pp_usd = pp_sha256_est_revenue_usd(self._pp_data) if self._pp_data else None
+
+            braiins_usd = None
+            if self._braiins_profile and btc_price:
+                raw = self._braiins_profile.get("today_reward")
+                if raw is not None:
+                    braiins_usd = float(raw) * btc_price
+
+            usd_parts = [v for v in (pp_usd, braiins_usd) if v is not None]
+            if not usd_parts:
+                return None
+            return round(sum(usd_parts) * usd_to_gbp, 2)
+        except Exception:
+            _LOGGER.exception("Error calculating combined revenue GBP")
             return None
 
 
