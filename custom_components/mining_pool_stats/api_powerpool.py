@@ -120,25 +120,19 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
     hr_dict = user.get("hashrate", {})
     key = find_algo_key(hr_dict, SHA256_ALIASES)
     if not key:
-        _LOGGER.warning("mining_pool_stats: no SHA-256 key in hashrate dict keys=%s", list(hr_dict.keys()))
         return None
     algo = hr_dict[key]
     hashrate_avg_ths = _to_ths(algo.get("hashrate_avg"), algo.get("hashrate_avg_units"))
     if not hashrate_avg_ths or hashrate_avg_ths <= 0:
-        _LOGGER.warning("mining_pool_stats: hashrate_avg unusable — raw=%s units=%s", algo.get("hashrate_avg"), algo.get("hashrate_avg_units"))
         return None
 
     earnings_dict = user.get("earnings", {})
     ekey = find_algo_key(earnings_dict, SHA256_ALIASES)
     if not ekey:
-        _LOGGER.warning("mining_pool_stats: no SHA-256 key in earnings dict keys=%s", list(earnings_dict.keys()))
         return None
     entries = earnings_dict.get(ekey)
     if not isinstance(entries, list) or not entries:
-        _LOGGER.warning("mining_pool_stats: earnings entries missing or empty — got %r", entries)
         return None
-
-    _LOGGER.warning("mining_pool_stats DEBUG earnings — count=%d first_entry=%s", len(entries), entries[0])
 
     rates: list[float] = []
     for entry in entries:
@@ -150,7 +144,6 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
                 break
         speed = entry.get("speed")
         if btc_raw is None or speed is None:
-            _LOGGER.warning("mining_pool_stats: skipping entry — btc_raw=%s speed=%s entry_keys=%s", btc_raw, speed, list(entry.keys()))
             continue
         try:
             btc = float(btc_raw)
@@ -165,13 +158,10 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
         rates.append(btc / spd_ths)
 
     if not rates:
-        _LOGGER.warning("mining_pool_stats: no valid rates from %d entries", len(entries))
         return None
 
     avg_rate = sum(rates) / len(rates)
-    result = round(avg_rate * hashrate_avg_ths, 8)
-    _LOGGER.warning("mining_pool_stats: estimated_24h_btc=%s (avg_rate=%s hashrate_avg=%s)", result, avg_rate, hashrate_avg_ths)
-    return result
+    return round(avg_rate * hashrate_avg_ths, 8)
 
 
 def pp_btc_balance(user: dict) -> float | None:
