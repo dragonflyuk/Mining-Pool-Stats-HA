@@ -19,7 +19,7 @@ from .const import BRAIINS_BASE_URL, HASHRATE_TO_TH
 _LOGGER = logging.getLogger(__name__)
 
 # Set to True temporarily to dump the raw profile to the HA log
-_DEBUG_PROFILE = True
+_DEBUG_PROFILE = False
 
 
 def _to_ths(value: float | None, unit: str | None) -> float | None:

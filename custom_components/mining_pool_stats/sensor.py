@@ -48,9 +48,9 @@ async def async_setup_entry(
     async_add_entities(
         [
             # --- Braiins Pool ---
-            BraiinsHashrateSensor(coordinator, config_entry, "hashrate_5m", "Hashrate (5 min)"),
-            BraiinsHashrateSensor(coordinator, config_entry, "hashrate_60m", "Hashrate (60 min)"),
-            BraiinsHashrateSensor(coordinator, config_entry, "hashrate_24h", "Hashrate (24 h)"),
+            BraiinsHashrateSensor(coordinator, config_entry, "hash_rate_5m", "Hashrate (5 min)"),
+            BraiinsHashrateSensor(coordinator, config_entry, "hash_rate_60m", "Hashrate (60 min)"),
+            BraiinsHashrateSensor(coordinator, config_entry, "hash_rate_24h", "Hashrate (24 h)"),
             BraiinsBalanceSensor(coordinator, config_entry, "current_balance", "Balance"),
             BraiinsBalanceSensor(coordinator, config_entry, "today_reward", "Today's Reward (BTC)"),
             BraiinsTodayRewardUSDSensor(coordinator, config_entry),
@@ -148,7 +148,7 @@ class BraiinsHashrateSensor(_BraiinsSensorBase):
 
 
 class BraiinsBalanceSensor(_BraiinsSensorBase):
-    """BTC balance / reward field."""
+    """BTC balance / reward field. API returns these as strings — cast to float."""
 
     _attr_native_unit_of_measurement = BTC
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -163,7 +163,9 @@ class BraiinsBalanceSensor(_BraiinsSensorBase):
     @property
     def native_value(self) -> float | None:
         if self._profile:
-            return self._profile.get(self._field)
+            val = self._profile.get(self._field)
+            if val is not None:
+                return float(val)
         return None
 
 
@@ -191,7 +193,7 @@ class BraiinsTodayRewardUSDSensor(_BraiinsSensorBase):
 
     _attr_native_unit_of_measurement = "USD"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_name = "Today's Reward (USD)"
     _attr_suggested_display_precision = 2
     _attr_icon = "mdi:cash"
@@ -263,7 +265,7 @@ class PowerPoolRevenueSensor(_PowerPoolSensorBase):
 
     _attr_native_unit_of_measurement = "USD"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_name = "Estimated Revenue (24 h USD)"
     _attr_suggested_display_precision = 2
 
@@ -423,7 +425,7 @@ class CombinedRevenueUSDSensor(_CombinedSensorBase):
 
     _attr_native_unit_of_measurement = "USD"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_name = "Estimated Revenue (24 h USD)"
     _attr_suggested_display_precision = 2
 
@@ -480,11 +482,8 @@ class CombinedRevenueBTCSensor(_CombinedSensorBase):
     @property
     def native_value(self) -> float | None:
         try:
-            braiins_btc = (
-                self._braiins_profile.get("today_reward")
-                if self._braiins_profile
-                else None
-            )
+            raw = self._braiins_profile.get("today_reward") if self._braiins_profile else None
+            braiins_btc = float(raw) if raw is not None else None
 
             pp_btc = None
             btc_price = self._btc_price
@@ -515,11 +514,8 @@ class CombinedBTCBalanceSensor(_CombinedSensorBase):
     @property
     def native_value(self) -> float | None:
         try:
-            braiins_bal = (
-                self._braiins_profile.get("current_balance")
-                if self._braiins_profile
-                else None
-            )
+            raw = self._braiins_profile.get("current_balance") if self._braiins_profile else None
+            braiins_bal = float(raw) if raw is not None else None
             pp_bal = pp_btc_balance(self._pp_data) if self._pp_data else None
 
             parts = [v for v in (braiins_bal, pp_bal) if v is not None]
