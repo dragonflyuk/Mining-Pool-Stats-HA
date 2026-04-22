@@ -150,7 +150,7 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
             spd = float(speed)
         except (TypeError, ValueError):
             continue
-        if spd <= 0 or btc < 0:
+        if spd <= 0 or btc <= 0:
             continue
         spd_ths = _to_ths(spd, entry.get("speed_units") or "TH/s")
         if not spd_ths or spd_ths <= 0:

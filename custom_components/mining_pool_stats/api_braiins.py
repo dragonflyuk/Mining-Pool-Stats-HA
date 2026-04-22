@@ -175,7 +175,7 @@ def extract_braiins_estimated_24h_btc(
             btc = float(raw)
         except (TypeError, ValueError):
             continue
-        if btc < 0:
+        if btc <= 0:
             continue
         date = entry.get("date")
         # Use per-day hashrate where available, otherwise fall back to current
