@@ -27,15 +27,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def async_update_data() -> dict:
         """Fetch data from both pools simultaneously."""
-        braiins_profile, braiins_workers, braiins_rewards, pp_user, pp_pool, usd_to_gbp = (
-            await asyncio.gather(
-                braiins.get_user_profile(),
-                braiins.get_workers(),
-                braiins.get_rewards(),
-                powerpool.get_user_data(),
-                powerpool.get_pool_data(),
-                get_usd_to_gbp(session),
-            )
+        (
+            braiins_profile, braiins_workers, braiins_rewards,
+            braiins_hr_daily, pp_user, pp_pool, usd_to_gbp,
+        ) = await asyncio.gather(
+            braiins.get_user_profile(),
+            braiins.get_workers(),
+            braiins.get_rewards(),
+            braiins.get_daily_hashrate(),
+            powerpool.get_user_data(),
+            powerpool.get_pool_data(),
+            get_usd_to_gbp(session),
         )
 
         if braiins_profile is None and pp_user is None:
@@ -43,9 +45,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         return {
             "braiins": {
-                "profile": braiins_profile,   # unwrapped btc dict
-                "workers": braiins_workers,    # unwrapped btc dict
-                "rewards": braiins_rewards,    # unwrapped btc dict (daily history)
+                "profile":      braiins_profile,   # unwrapped btc dict
+                "workers":      braiins_workers,    # unwrapped btc dict
+                "rewards":      braiins_rewards,    # unwrapped btc dict (daily totals)
+                "hr_daily":     braiins_hr_daily,   # list of daily hashrate entries
             },
             "powerpool": pp_user,              # inner per-user dict
             "pp_pool": pp_pool,                # public pool data (includes prices)

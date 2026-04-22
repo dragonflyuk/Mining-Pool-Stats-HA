@@ -78,6 +78,15 @@ class BraiinsPoolAPI:
             return data["btc"]
         return None
 
+    async def get_daily_hashrate(self) -> list | None:
+        """Return the list of daily hashrate entries, or None on failure."""
+        data = await self._get("/accounts/hash_rate_daily/json/btc")
+        if data and "btc" in data:
+            entries = data["btc"]
+            if isinstance(entries, list):
+                return entries
+        return None
+
     async def validate(self) -> bool:
         """Return True if the API key is valid (profile fetch succeeds)."""
         return await self.get_user_profile() is not None
@@ -115,27 +124,47 @@ def extract_braiins_hashrate_ths(profile: dict, field: str) -> float | None:
     return None
 
 
-def extract_braiins_estimated_24h_btc(profile: dict, rewards: dict) -> float | None:
-    """Estimate 24 h BTC: mean(total_reward / hash_rate_24h) × hash_rate_24h.
+def extract_braiins_estimated_24h_btc(
+    profile: dict,
+    rewards: dict,
+    hashrate_daily: list | None = None,
+) -> float | None:
+    """Estimate 24 h BTC: mean(total_reward / hash_rate_24h) × current hash_rate_24h.
 
-    The rewards API has no per-day hashrate, so hash_rate_24h is used as a
-    constant proxy.  Averaging the per-TH/s rate across all returned days
-    then scaling back to current average hashrate follows the same pattern
-    as the PowerPool calculation.
+    Joins daily rewards with daily hashrates by date (Unix timestamp) to
+    compute the exact BTC-per-TH/s rate for each day — the same calculation
+    used for PowerPool.  Falls back to the profile's current hash_rate_24h
+    as the denominator for any day that has no matching hashrate entry.
     """
     if not rewards or not profile:
         return None
 
-    hashrate_24h = extract_braiins_hashrate_ths(profile, "hash_rate_24h")
-    if not hashrate_24h or hashrate_24h <= 0:
+    current_hr_ths = extract_braiins_hashrate_ths(profile, "hash_rate_24h")
+    if not current_hr_ths or current_hr_ths <= 0:
         return None
 
-    daily = rewards.get("daily_rewards")
-    if not isinstance(daily, list) or not daily:
+    daily_rewards = rewards.get("daily_rewards")
+    if not isinstance(daily_rewards, list) or not daily_rewards:
         return None
+
+    # Build date → TH/s lookup from the daily hashrate endpoint
+    hr_by_date: dict[int, float] = {}
+    if isinstance(hashrate_daily, list):
+        for entry in hashrate_daily:
+            date = entry.get("date")
+            hr = entry.get("hash_rate_24h")
+            unit = entry.get("hash_rate_unit") or "Gh/s"
+            if date is None or hr is None:
+                continue
+            try:
+                hr_ths = _to_ths(float(hr), unit)
+            except (TypeError, ValueError):
+                continue
+            if hr_ths and hr_ths > 0:
+                hr_by_date[int(date)] = hr_ths
 
     rates: list[float] = []
-    for entry in daily:
+    for entry in daily_rewards:
         raw = entry.get("total_reward")
         if raw is None:
             continue
@@ -145,10 +174,15 @@ def extract_braiins_estimated_24h_btc(profile: dict, rewards: dict) -> float | N
             continue
         if btc < 0:
             continue
-        rates.append(btc / hashrate_24h)
+        date = entry.get("date")
+        # Use per-day hashrate where available, otherwise current average
+        day_hr_ths = hr_by_date.get(int(date), current_hr_ths) if date is not None else current_hr_ths
+        if day_hr_ths <= 0:
+            continue
+        rates.append(btc / day_hr_ths)
 
     if not rates:
         return None
 
     avg_rate = sum(rates) / len(rates)
-    return round(avg_rate * hashrate_24h, 8)
+    return round(avg_rate * current_hr_ths, 8)

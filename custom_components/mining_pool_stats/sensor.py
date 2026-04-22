@@ -133,6 +133,12 @@ class _BraiinsSensorBase(_PoolSensorBase):
         return None
 
     @property
+    def _hr_daily(self) -> list | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("braiins", {}).get("hr_daily")
+        return None
+
+    @property
     def available(self) -> bool:
         return super().available and self._profile is not None
 
@@ -243,7 +249,7 @@ class BraiinsEstimatedRevenueBTCSensor(_BraiinsSensorBase):
     @property
     def native_value(self) -> float | None:
         if self._profile and self._rewards:
-            return extract_braiins_estimated_24h_btc(self._profile, self._rewards)
+            return extract_braiins_estimated_24h_btc(self._profile, self._rewards, self._hr_daily)
         return None
 
 
@@ -269,7 +275,7 @@ class BraiinsEstimatedRevenueUSDSensor(_BraiinsSensorBase):
     def native_value(self) -> float | None:
         try:
             if self._profile and self._rewards and self._btc_price:
-                btc = extract_braiins_estimated_24h_btc(self._profile, self._rewards)
+                btc = extract_braiins_estimated_24h_btc(self._profile, self._rewards, self._hr_daily)
                 if btc is not None:
                     return round(btc * self._btc_price, 2)
         except Exception:
@@ -426,6 +432,12 @@ class _CombinedSensorBase(_PoolSensorBase):
         return None
 
     @property
+    def _braiins_hr_daily(self) -> list | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("braiins", {}).get("hr_daily")
+        return None
+
+    @property
     def _pp_data(self) -> dict | None:
         if self.coordinator.data:
             return self.coordinator.data.get("powerpool")
@@ -511,7 +523,7 @@ class CombinedRevenueUSDSensor(_CombinedSensorBase):
 
             braiins_usd = None
             if self._braiins_profile and self._braiins_rewards and btc_price:
-                braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards)
+                braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards, self._braiins_hr_daily)
                 if braiins_btc is not None:
                     braiins_usd = braiins_btc * btc_price
 
@@ -543,7 +555,7 @@ class CombinedRevenueBTCSensor(_CombinedSensorBase):
     @property
     def native_value(self) -> float | None:
         try:
-            braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards) if (self._braiins_profile and self._braiins_rewards) else None
+            braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards, self._braiins_hr_daily) if (self._braiins_profile and self._braiins_rewards) else None
             pp_btc = pp_sha256_estimated_24h_btc(self._pp_data) if self._pp_data else None
 
             parts = [v for v in (braiins_btc, pp_btc) if v is not None]
@@ -593,7 +605,7 @@ class CombinedRevenueGBPSensor(_CombinedSensorBase):
 
             braiins_usd = None
             if self._braiins_profile and self._braiins_rewards and btc_price:
-                braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards)
+                braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards, self._braiins_hr_daily)
                 if braiins_btc is not None:
                     braiins_usd = braiins_btc * btc_price
 
