@@ -147,8 +147,11 @@ def extract_braiins_estimated_24h_btc(
     if not isinstance(daily_rewards, list) or not daily_rewards:
         return None
 
-    # Build date → TH/s lookup from the daily hashrate endpoint
-    hr_by_date: dict[int, float] = {}
+    # Build day-number → TH/s lookup from the daily hashrate endpoint.
+    # Braiins uses Prague (UTC+1/+2) midnight for hash_rate_daily but UTC
+    # midnight for daily_rewards, so timestamps differ by up to 7200 s.
+    # Keying by (timestamp // 86400) absorbs any timezone offset ≤ ±12 h.
+    hr_by_day: dict[int, float] = {}
     if isinstance(hashrate_daily, list):
         for entry in hashrate_daily:
             date = entry.get("date")
@@ -161,7 +164,7 @@ def extract_braiins_estimated_24h_btc(
             except (TypeError, ValueError):
                 continue
             if hr_ths and hr_ths > 0:
-                hr_by_date[int(date)] = hr_ths
+                hr_by_day[int(date) // 86400] = hr_ths
 
     rates: list[float] = []
     for entry in daily_rewards:
@@ -175,8 +178,11 @@ def extract_braiins_estimated_24h_btc(
         if btc < 0:
             continue
         date = entry.get("date")
-        # Use per-day hashrate where available, otherwise current average
-        day_hr_ths = hr_by_date.get(int(date), current_hr_ths) if date is not None else current_hr_ths
+        # Use per-day hashrate where available, otherwise fall back to current
+        if date is not None:
+            day_hr_ths = hr_by_day.get(int(date) // 86400, current_hr_ths)
+        else:
+            day_hr_ths = current_hr_ths
         if day_hr_ths <= 0:
             continue
         rates.append(btc / day_hr_ths)
