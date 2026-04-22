@@ -71,6 +71,13 @@ class BraiinsPoolAPI:
             return data["btc"]
         return None
 
+    async def get_rewards(self) -> dict | None:
+        """Return the unwrapped daily rewards dict, or None on failure."""
+        data = await self._get("/accounts/rewards/json/btc")
+        if data and "btc" in data:
+            return data["btc"]
+        return None
+
     async def validate(self) -> bool:
         """Return True if the API key is valid (profile fetch succeeds)."""
         return await self.get_user_profile() is not None
@@ -106,3 +113,42 @@ def extract_braiins_hashrate_ths(profile: dict, field: str) -> float | None:
         _LOGGER.exception("Error extracting Braiins hashrate field %s", field)
 
     return None
+
+
+def extract_braiins_estimated_24h_btc(profile: dict, rewards: dict) -> float | None:
+    """Estimate 24 h BTC: mean(total_reward / hash_rate_24h) × hash_rate_24h.
+
+    The rewards API has no per-day hashrate, so hash_rate_24h is used as a
+    constant proxy.  Averaging the per-TH/s rate across all returned days
+    then scaling back to current average hashrate follows the same pattern
+    as the PowerPool calculation.
+    """
+    if not rewards or not profile:
+        return None
+
+    hashrate_24h = extract_braiins_hashrate_ths(profile, "hash_rate_24h")
+    if not hashrate_24h or hashrate_24h <= 0:
+        return None
+
+    daily = rewards.get("daily_rewards")
+    if not isinstance(daily, list) or not daily:
+        return None
+
+    rates: list[float] = []
+    for entry in daily:
+        raw = entry.get("total_reward")
+        if raw is None:
+            continue
+        try:
+            btc = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if btc < 0:
+            continue
+        rates.append(btc / hashrate_24h)
+
+    if not rates:
+        return None
+
+    avg_rate = sum(rates) / len(rates)
+    return round(avg_rate * hashrate_24h, 8)

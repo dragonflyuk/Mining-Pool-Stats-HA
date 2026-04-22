@@ -21,7 +21,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api_braiins import extract_braiins_hashrate_ths
+from .api_braiins import extract_braiins_estimated_24h_btc, extract_braiins_hashrate_ths
 from .api_powerpool import (
     pp_btc_balance,
     pp_btc_price_usd,
@@ -55,6 +55,8 @@ async def async_setup_entry(
             BraiinsBalanceSensor(coordinator, config_entry, "today_reward", "Today's Reward (BTC)"),
             BraiinsTodayRewardUSDSensor(coordinator, config_entry),
             BraiinsBalanceSensor(coordinator, config_entry, "estimated_reward", "Estimated Reward"),
+            BraiinsEstimatedRevenueBTCSensor(coordinator, config_entry),
+            BraiinsEstimatedRevenueUSDSensor(coordinator, config_entry),
             BraiinsWorkerSensor(coordinator, config_entry, "ok_workers", "Workers OK"),
             BraiinsWorkerSensor(coordinator, config_entry, "low_workers", "Workers Low Hashrate"),
             BraiinsWorkerSensor(coordinator, config_entry, "off_workers", "Workers Offline"),
@@ -122,6 +124,12 @@ class _BraiinsSensorBase(_PoolSensorBase):
     def _profile(self) -> dict | None:
         if self.coordinator.data:
             return self.coordinator.data.get("braiins", {}).get("profile")
+        return None
+
+    @property
+    def _rewards(self) -> dict | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("braiins", {}).get("rewards")
         return None
 
     @property
@@ -217,6 +225,55 @@ class BraiinsTodayRewardUSDSensor(_BraiinsSensorBase):
                     return round(float(btc) * self._btc_price, 2)
         except Exception:
             _LOGGER.exception("Error calculating Braiins today_reward USD")
+        return None
+
+
+class BraiinsEstimatedRevenueBTCSensor(_BraiinsSensorBase):
+    """Estimated 24 h BTC revenue from historical rate × current avg hashrate."""
+
+    _attr_native_unit_of_measurement = BTC
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:bitcoin"
+    _attr_name = "Estimated Revenue (24 h BTC)"
+    _attr_suggested_display_precision = 8
+
+    def __init__(self, coordinator, config_entry) -> None:
+        super().__init__(coordinator, config_entry, "braiins_est_revenue_btc")
+
+    @property
+    def native_value(self) -> float | None:
+        if self._profile and self._rewards:
+            return extract_braiins_estimated_24h_btc(self._profile, self._rewards)
+        return None
+
+
+class BraiinsEstimatedRevenueUSDSensor(_BraiinsSensorBase):
+    """Estimated 24 h USD revenue (BTC estimate × spot price)."""
+
+    _attr_native_unit_of_measurement = "USD"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_name = "Estimated Revenue (24 h USD)"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator, config_entry) -> None:
+        super().__init__(coordinator, config_entry, "braiins_est_revenue_usd")
+
+    @property
+    def _btc_price(self) -> float | None:
+        if self.coordinator.data:
+            return pp_btc_price_usd(self.coordinator.data.get("pp_pool"))
+        return None
+
+    @property
+    def native_value(self) -> float | None:
+        try:
+            if self._profile and self._rewards and self._btc_price:
+                btc = extract_braiins_estimated_24h_btc(self._profile, self._rewards)
+                if btc is not None:
+                    return round(btc * self._btc_price, 2)
+        except Exception:
+            _LOGGER.exception("Error calculating Braiins estimated revenue USD")
         return None
 
 
@@ -363,6 +420,12 @@ class _CombinedSensorBase(_PoolSensorBase):
         return None
 
     @property
+    def _braiins_rewards(self) -> dict | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("braiins", {}).get("rewards")
+        return None
+
+    @property
     def _pp_data(self) -> dict | None:
         if self.coordinator.data:
             return self.coordinator.data.get("powerpool")
@@ -418,11 +481,7 @@ class CombinedWorkersSensor(_CombinedSensorBase):
 
 
 class CombinedRevenueUSDSensor(_CombinedSensorBase):
-    """Total estimated 24 h revenue in USD across both pools.
-
-    PowerPool provides USD directly. Braiins today_reward (BTC) is converted
-    using the BTC spot price from the PowerPool public API.
-    """
+    """Total estimated 24 h revenue in USD across both pools."""
 
     _attr_native_unit_of_measurement = "USD"
     _attr_device_class = SensorDeviceClass.MONETARY
@@ -451,10 +510,10 @@ class CombinedRevenueUSDSensor(_CombinedSensorBase):
                     pp_usd = pp_btc * btc_price
 
             braiins_usd = None
-            if self._braiins_profile and btc_price:
-                raw = self._braiins_profile.get("today_reward")
-                if raw is not None:
-                    braiins_usd = float(raw) * btc_price
+            if self._braiins_profile and self._braiins_rewards and btc_price:
+                braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards)
+                if braiins_btc is not None:
+                    braiins_usd = braiins_btc * btc_price
 
             parts = [v for v in (pp_usd, braiins_usd) if v is not None]
             return round(sum(parts), 2) if parts else None
@@ -464,11 +523,7 @@ class CombinedRevenueUSDSensor(_CombinedSensorBase):
 
 
 class CombinedRevenueBTCSensor(_CombinedSensorBase):
-    """Total estimated 24 h revenue in BTC across both pools.
-
-    Braiins today_reward is already BTC. PowerPool USD figure is converted
-    using the BTC spot price from the PowerPool public API.
-    """
+    """Total estimated 24 h revenue in BTC across both pools."""
 
     _attr_native_unit_of_measurement = BTC
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -488,9 +543,7 @@ class CombinedRevenueBTCSensor(_CombinedSensorBase):
     @property
     def native_value(self) -> float | None:
         try:
-            raw = self._braiins_profile.get("today_reward") if self._braiins_profile else None
-            braiins_btc = float(raw) if raw is not None else None
-
+            braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards) if (self._braiins_profile and self._braiins_rewards) else None
             pp_btc = pp_sha256_estimated_24h_btc(self._pp_data) if self._pp_data else None
 
             parts = [v for v in (braiins_btc, pp_btc) if v is not None]
@@ -539,10 +592,10 @@ class CombinedRevenueGBPSensor(_CombinedSensorBase):
                     pp_usd = pp_btc * btc_price
 
             braiins_usd = None
-            if self._braiins_profile and btc_price:
-                raw = self._braiins_profile.get("today_reward")
-                if raw is not None:
-                    braiins_usd = float(raw) * btc_price
+            if self._braiins_profile and self._braiins_rewards and btc_price:
+                braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards)
+                if braiins_btc is not None:
+                    braiins_usd = braiins_btc * btc_price
 
             usd_parts = [v for v in (pp_usd, braiins_usd) if v is not None]
             if not usd_parts:
