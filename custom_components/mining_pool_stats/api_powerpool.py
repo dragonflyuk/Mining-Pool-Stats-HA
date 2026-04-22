@@ -109,13 +109,23 @@ def pp_sha256_hashrate_avg_ths(user: dict) -> float | None:
     return _to_ths(algo.get("hashrate_avg"), algo.get("hashrate_avg_units"))
 
 
-def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
-    """Estimate 24 h BTC earnings: mean(coin_balance / speed) × hashrate_avg.
+def pp_sha256_estimated_24h_btc(
+    user: dict, ha_hashrate_avg: float | None = None
+) -> float | None:
+    """Estimate 24 h BTC earnings: mean(coin_balance / speed) × effective_hashrate.
 
     Each earnings entry records the BTC paid (coin_balance) and the hashrate
     that produced it (speed).  Their ratio is the BTC earned per TH/s for that
-    payment.  Averaging across entries gives a stable rate; multiplying by the
-    24 h average hashrate scales it to our rig's contribution.
+    payment.  Averaging across entries gives a stable rate, which is then scaled
+    by the effective 24 h average hashrate.
+
+    Priority for effective hashrate:
+      1. ha_hashrate_avg — computed from HA recorder history of the current
+         hashrate sensor (unaffected by the PowerPool API returning 0 when
+         the miner has been offline for the full 24 h window).
+      2. hashrate_avg from the PowerPool API — used when ha_hashrate_avg is
+         unavailable and the API value is non-zero.
+      3. None — returns None rather than guessing.
     """
     hr_dict = user.get("hashrate", {})
     key = find_algo_key(hr_dict, SHA256_ALIASES)
@@ -123,8 +133,6 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
         return None
     algo = hr_dict[key]
     hashrate_avg_ths = _to_ths(algo.get("hashrate_avg"), algo.get("hashrate_avg_units"))
-    if not hashrate_avg_ths or hashrate_avg_ths <= 0:
-        return None
 
     earnings_dict = user.get("earnings", {})
     ekey = find_algo_key(earnings_dict, SHA256_ALIASES)
@@ -136,7 +144,6 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
 
     rates: list[float] = []
     for entry in entries:
-        # coin_balance is inside entry["coins"] — find the BTC entry
         btc_raw = None
         for coin in entry.get("coins", []):
             if coin.get("coin_ticker", "").upper() == "BTC":
@@ -161,7 +168,17 @@ def pp_sha256_estimated_24h_btc(user: dict) -> float | None:
         return None
 
     avg_rate = sum(rates) / len(rates)
-    return round(avg_rate * hashrate_avg_ths, 8)
+
+    # Prefer HA-computed 24 h average (immune to PowerPool returning 0 when
+    # the miner has been fully offline for the API's averaging window).
+    if ha_hashrate_avg and ha_hashrate_avg > 0:
+        effective_hr = ha_hashrate_avg
+    elif hashrate_avg_ths and hashrate_avg_ths > 0:
+        effective_hr = hashrate_avg_ths
+    else:
+        return None
+
+    return round(avg_rate * effective_hr, 8)
 
 
 def pp_btc_balance(user: dict) -> float | None:

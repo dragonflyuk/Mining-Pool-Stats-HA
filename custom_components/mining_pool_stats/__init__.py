@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -15,6 +15,48 @@ from .api_powerpool import PowerPoolAPI
 from .const import DOMAIN, PLATFORMS, UPDATE_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
+
+_PP_HASHRATE_SENSOR = "sensor.powerpool_hashrate_current"
+
+
+async def _calc_pp_hashrate_24h_avg(hass: HomeAssistant) -> float | None:
+    """Return a 24 h average TH/s from HA recorder history of the PowerPool current
+    hashrate sensor.  Returns None if the recorder is unavailable or has no data."""
+    try:
+        from homeassistant.components.recorder import get_instance
+        from homeassistant.components.recorder.history import get_significant_states
+
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=24)
+
+        instance = get_instance(hass)
+        states_map = await instance.async_add_executor_job(
+            get_significant_states,
+            hass,
+            start,
+            end,
+            [_PP_HASHRATE_SENSOR],
+        )
+
+        sensor_states = states_map.get(_PP_HASHRATE_SENSOR, [])
+        values: list[float] = []
+        for state in sensor_states:
+            if state.state not in ("unknown", "unavailable", None, ""):
+                try:
+                    values.append(float(state.state))
+                except (ValueError, TypeError):
+                    pass
+
+        if not values:
+            return None
+        return round(sum(values) / len(values), 4)
+
+    except Exception:
+        _LOGGER.warning(
+            "Could not query HA recorder for %s history — falling back to API value",
+            _PP_HASHRATE_SENSOR,
+        )
+        return None
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -30,6 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         (
             braiins_profile, braiins_workers, braiins_rewards,
             braiins_hr_daily, pp_user, pp_pool, usd_to_gbp,
+            pp_hashrate_24h_avg,
         ) = await asyncio.gather(
             braiins.get_user_profile(),
             braiins.get_workers(),
@@ -38,6 +81,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             powerpool.get_user_data(),
             powerpool.get_pool_data(),
             get_usd_to_gbp(session),
+            _calc_pp_hashrate_24h_avg(hass),
         )
 
         if braiins_profile is None and pp_user is None:
@@ -53,6 +97,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "powerpool": pp_user,              # inner per-user dict
             "pp_pool": pp_pool,                # public pool data (includes prices)
             "usd_to_gbp": usd_to_gbp,         # float or None
+            "pp_hashrate_24h_avg": pp_hashrate_24h_avg,  # HA recorder-computed TH/s average
         }
 
     coordinator = DataUpdateCoordinator(

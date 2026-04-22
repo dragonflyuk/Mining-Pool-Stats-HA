@@ -299,6 +299,12 @@ class _PowerPoolSensorBase(_PoolSensorBase):
         return None
 
     @property
+    def _pp_hashrate_24h_avg(self) -> float | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("pp_hashrate_24h_avg")
+        return None
+
+    @property
     def available(self) -> bool:
         return super().available and self._pp_data is not None
 
@@ -320,6 +326,11 @@ class PowerPoolHashrateSensor(_PowerPoolSensorBase):
         if self._pp_data:
             if self._variant == "current":
                 return pp_sha256_hashrate_ths(self._pp_data)
+            # Prefer the HA recorder-computed 24 h average; fall back to the
+            # API value when recorder history isn't available yet.
+            ha_avg = self._pp_hashrate_24h_avg
+            if ha_avg is not None:
+                return ha_avg
             return pp_sha256_hashrate_avg_ths(self._pp_data)
         return None
 
@@ -339,7 +350,7 @@ class PowerPoolRevenueBTCSensor(_PowerPoolSensorBase):
     @property
     def native_value(self) -> float | None:
         if self._pp_data:
-            return pp_sha256_estimated_24h_btc(self._pp_data)
+            return pp_sha256_estimated_24h_btc(self._pp_data, self._pp_hashrate_24h_avg)
         return None
 
 
@@ -365,7 +376,7 @@ class PowerPoolRevenueSensor(_PowerPoolSensorBase):
     def native_value(self) -> float | None:
         try:
             if self._pp_data and self._btc_price:
-                btc = pp_sha256_estimated_24h_btc(self._pp_data)
+                btc = pp_sha256_estimated_24h_btc(self._pp_data, self._pp_hashrate_24h_avg)
                 if btc is not None:
                     return round(btc * self._btc_price, 2)
         except Exception:
@@ -443,6 +454,12 @@ class _CombinedSensorBase(_PoolSensorBase):
             return self.coordinator.data.get("powerpool")
         return None
 
+    @property
+    def _pp_hashrate_24h_avg(self) -> float | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("pp_hashrate_24h_avg")
+        return None
+
 
 class CombinedHashrateSensor(_CombinedSensorBase):
     """Total SHA-256 hashrate across both pools (5-min / current average)."""
@@ -517,7 +534,7 @@ class CombinedRevenueUSDSensor(_CombinedSensorBase):
 
             pp_usd = None
             if self._pp_data and btc_price:
-                pp_btc = pp_sha256_estimated_24h_btc(self._pp_data)
+                pp_btc = pp_sha256_estimated_24h_btc(self._pp_data, self._pp_hashrate_24h_avg)
                 if pp_btc is not None:
                     pp_usd = pp_btc * btc_price
 
@@ -556,7 +573,7 @@ class CombinedRevenueBTCSensor(_CombinedSensorBase):
     def native_value(self) -> float | None:
         try:
             braiins_btc = extract_braiins_estimated_24h_btc(self._braiins_profile, self._braiins_rewards, self._braiins_hr_daily) if (self._braiins_profile and self._braiins_rewards) else None
-            pp_btc = pp_sha256_estimated_24h_btc(self._pp_data) if self._pp_data else None
+            pp_btc = pp_sha256_estimated_24h_btc(self._pp_data, self._pp_hashrate_24h_avg) if self._pp_data else None
 
             parts = [v for v in (braiins_btc, pp_btc) if v is not None]
             return round(sum(parts), 8) if parts else None
@@ -599,7 +616,7 @@ class CombinedRevenueGBPSensor(_CombinedSensorBase):
 
             pp_usd = None
             if self._pp_data and btc_price:
-                pp_btc = pp_sha256_estimated_24h_btc(self._pp_data)
+                pp_btc = pp_sha256_estimated_24h_btc(self._pp_data, self._pp_hashrate_24h_avg)
                 if pp_btc is not None:
                     pp_usd = pp_btc * btc_price
 
